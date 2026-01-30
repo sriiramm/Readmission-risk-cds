@@ -1,3 +1,16 @@
+# Virtual environment
+.venv/
+
+# Raw data (do not commit datasets)
+data/raw/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Model artifacts
+*.joblib
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]

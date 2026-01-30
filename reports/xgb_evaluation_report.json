@@ -1,0 +1,18 @@
+{
+  "roc_auc": 1.0,
+  "pr_auc": 1.0,
+  "threshold": {
+    "thr": 0.01,
+    "cost": 0.0,
+    "tn": 18083,
+    "fp": 0,
+    "fn": 0,
+    "tp": 2271
+  },
+  "savings": {
+    "prevented_readmissions": 567.75,
+    "gross_savings": 6813000.0,
+    "intervention_cost": 681300.0,
+    "net_savings": 6131700.0
+  }
+}
