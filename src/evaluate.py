@@ -17,17 +17,27 @@ def pick_threshold_cost(y_true, y_prob, c_fn=5000, c_fp=200):
             best = {"thr": float(thr), "cost": float(cost), "tn": int(tn), "fp": int(fp), "fn": int(fn), "tp": int(tp)}
     return best
 
-def projected_savings(tp, fp, cost_readmit=12000, cost_intervene=300, effectiveness=0.25):
-    prevented = tp * effectiveness
-    gross = prevented * cost_readmit
-    intervention_cost = (tp + fp) * cost_intervene
-    net = gross - intervention_cost
+def projected_savings(tp, fp, cost_readmit, cost_intervene, effectiveness, avoidable_fraction=1.0):
+    """
+    tp, fp can be ints or floats (e.g., daily averages).
+    effectiveness: fraction of avoidable readmissions prevented among selected true positives.
+    avoidable_fraction: fraction of readmissions considered avoidable (realism knob).
+    """
+    tp = float(tp)
+    fp = float(fp)
+
+    prevented = tp * float(avoidable_fraction) * float(effectiveness)
+    gross_savings = prevented * float(cost_readmit)
+    intervention_cost = (tp + fp) * float(cost_intervene)
+    net_savings = gross_savings - intervention_cost
+
     return {
-        "prevented_readmissions": float(prevented),
-        "gross_savings": float(gross),
-        "intervention_cost": float(intervention_cost),
-        "net_savings": float(net),
+        "prevented_readmissions": prevented,
+        "gross_savings": gross_savings,
+        "intervention_cost": intervention_cost,
+        "net_savings": net_savings,
     }
+
 
 def evaluate_model(model_path, X_test, y_test,
                    c_fn=5000, c_fp=200,
