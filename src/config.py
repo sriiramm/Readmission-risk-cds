@@ -1,3 +1,7 @@
+# Target definition for UCI Diabetes dataset
+TARGET_COL = "readmitted"
+POSITIVE_LABEL = "<30"
+
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
