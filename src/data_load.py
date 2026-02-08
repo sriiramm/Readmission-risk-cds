@@ -1,7 +1,8 @@
 from pathlib import Path
 import pandas as pd
 import numpy as np
-from src.config import TARGET_COL, POSITIVE_LABEL
+from src.config import TARGET_COL, POSITIVE_LABEL, DROP_COLS
+
 
 
 
