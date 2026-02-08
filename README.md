@@ -1,7 +1,7 @@
 🏥 30-Day Readmission Risk — Clinical Decision Support System (CDS)
 End-to-end healthcare analytics project focused on cost-optimal, capacity-constrained decision making.
 
-
+This project demonstrates how machine learning can be translated into real operational and financial decisions in healthcare. Instead of stopping at readmission risk prediction, I reframed the problem as a capacity-constrained intervention allocation challenge—selecting which patients to intervene on each day given limited staff and budget. Using real hospital data, cost-sensitive optimization, and operational simulation, the system identifies a staffing “sweet spot” that maximizes net savings while controlling false positives. Under conservative assumptions, the prototype estimates ~$1.7M in annual net savings for a mid-size hospital, with full transparency via SHAP explanations and fairness diagnostics. The project reflects how data science is applied in practice: balancing accuracy, cost, capacity, and equity.
 
 📌 Problem Statement
 
