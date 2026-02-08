@@ -1,5 +1,7 @@
 from pathlib import Path
 import pandas as pd
+import numpy as np
+
 
 # Repo root
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
