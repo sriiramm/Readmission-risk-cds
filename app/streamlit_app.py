@@ -67,7 +67,11 @@ def simulate_daily_ops(probs, y, daily_discharges, k, days=200, seed=42):
 
     tp_list, fp_list = [], []
     for _ in range(days):
-        day_idx = rng.choice(n, size=int(daily_discharges), replace=False if daily_discharges <= n else True)
+        day_idx = rng.choice(
+            n,
+            size=int(daily_discharges),
+            replace=False if daily_discharges <= n else True,
+        )
         day_probs = probs[day_idx]
         day_y = y[day_idx]
 
@@ -78,9 +82,29 @@ def simulate_daily_ops(probs, y, daily_discharges, k, days=200, seed=42):
     return float(np.mean(tp_list)), float(np.mean(fp_list))
 
 
-@st.cache_resource
-def get_shap_explainer(model, background_X):
-    return shap.TreeExplainer(model, data=background_X, feature_perturbation="interventional")
+def to_dense(X):
+    """Convert sparse matrix to dense numpy array (safe for SHAP)."""
+    return X.toarray() if hasattr(X, "toarray") else np.asarray(X)
+
+
+@st.cache_resource(show_spinner=False)
+def get_shap_objects():
+    """
+    Returns:
+      xgb_model: underlying XGBClassifier
+      prep: fitted ColumnTransformer
+      feature_names: names after preprocessing (one-hot expanded), or None
+    """
+    pipeline = load_model()
+    prep = pipeline.named_steps["prep"]
+    xgb_model = pipeline.named_steps["model"]
+
+    try:
+        feature_names = list(prep.get_feature_names_out())
+    except Exception:
+        feature_names = None
+
+    return xgb_model, prep, feature_names
 
 
 def main():
@@ -100,7 +124,6 @@ def main():
     effectiveness = col3.slider("Intervention effectiveness (risk reduction)", 0.05, 0.50, 0.25, 0.01)
     avoidable_fraction = st.slider("Avoidable fraction of readmissions (realism)", 0.10, 1.00, 0.60, 0.05)
 
-
     st.markdown("### Daily operations controls")
     cA, cB, cC = st.columns(3)
     daily_discharges = cA.number_input("Daily discharges (avg)", value=100, step=10)
@@ -112,20 +135,22 @@ def main():
 
     # Daily simulation -> expected TP/FP per day at capacity K
     avg_tp, avg_fp = simulate_daily_ops(
-        probs, y,
+        probs,
+        y,
         daily_discharges=int(daily_discharges),
         k=int(max_interventions),
         days=int(sim_days),
-        seed=42
+        seed=42,
     )
 
     sav_daily = projected_savings(
-        avg_tp, avg_fp,
-        cost_readmit, cost_intervene,
+        avg_tp,
+        avg_fp,
+        cost_readmit,
+        cost_intervene,
         effectiveness,
-        avoidable_fraction=avoidable_fraction
+        avoidable_fraction=avoidable_fraction,
     )
-
 
     # Report info (optional)
     capacity_report = load_capacity_report()
@@ -140,48 +165,52 @@ def main():
     c2.metric("Avg FP/day (within Top-K)", f"{avg_fp:.1f}")
     c3.metric("Prevented readmissions/day (expected)", f"{sav_daily['prevented_readmissions']:.1f}")
     c4.metric("Net savings/day (expected)", f"${sav_daily['net_savings']:,.0f}")
+
     precision_at_k = avg_tp / max(avg_tp + avg_fp, 1e-9)
     st.caption(f"Precision at K={max_interventions}: {precision_at_k:.1%} (TP / (TP + FP))")
     st.caption(f"Interventions/day (capacity): {max_interventions} | Avg contacted/day: {max_interventions}")
-
 
     annual_savings = sav_daily["net_savings"] * 365
     st.metric("Estimated annual net savings (scaled from daily)", f"${annual_savings:,.0f}")
 
     st.divider()
 
-    # Option A: ROI curve
+    # ROI curve
     st.markdown("### Capacity vs ROI (diminishing returns)")
     k_grid = list(range(10, 151, 10))
     rows = []
     for k in k_grid:
         tp_k, fp_k = simulate_daily_ops(
-            probs, y,
+            probs,
+            y,
             daily_discharges=int(daily_discharges),
             k=int(k),
             days=int(sim_days),
-            seed=42
+            seed=42,
         )
         sav_k = projected_savings(
-            tp_k, fp_k,
-            cost_readmit, cost_intervene,
+            tp_k,
+            fp_k,
+            cost_readmit,
+            cost_intervene,
             effectiveness,
-            avoidable_fraction=avoidable_fraction
+            avoidable_fraction=avoidable_fraction,
         )
-
-        rows.append({
-            "K_interventions_per_day": k,
-            "Avg_TP_per_day": tp_k,
-            "Avg_FP_per_day": fp_k,
-            "Annual_net_savings": sav_k["net_savings"] * 365,
-        })
+        rows.append(
+            {
+                "K_interventions_per_day": k,
+                "Avg_TP_per_day": tp_k,
+                "Avg_FP_per_day": fp_k,
+                "Annual_net_savings": sav_k["net_savings"] * 365,
+            }
+        )
 
     roi_df = pd.DataFrame(rows)
     fig_roi = px.line(
         roi_df,
         x="K_interventions_per_day",
         y="Annual_net_savings",
-        title="Annual Net Savings vs Daily Intervention Capacity (Top-K policy)"
+        title="Annual Net Savings vs Daily Intervention Capacity (Top-K policy)",
     )
     st.plotly_chart(fig_roi, use_container_width=True)
     st.caption("As capacity increases, ROI typically improves then shows diminishing returns as false positives rise.")
@@ -199,27 +228,46 @@ def main():
         st.dataframe(row)
 
         st.markdown("### Why is this patient high risk? (SHAP explanation)")
-        bg = splits.X_train.sample(n=min(200, len(splits.X_train)), random_state=RANDOM_STATE)
-        explainer = get_shap_explainer(model, bg)
 
-        shap_vals = explainer.shap_values(row)
-        shap_series = pd.Series(shap_vals[0], index=row.columns)
+        xgb_model, prep, feature_names = get_shap_objects()
+
+        # Transform row using preprocessing -> dense numeric matrix
+        row_t = prep.transform(row)
+        row_td = to_dense(row_t)
+
+        # Build explainer WITHOUT background data (avoids sparse/mixed crashes)
+        explainer = shap.TreeExplainer(xgb_model)
+
+        shap_vals = explainer.shap_values(row_td)
+        sv = np.array(shap_vals).reshape(-1)
+
+        if feature_names is None:
+            feature_names = [f"f{i}" for i in range(row_td.shape[1])]
+
+        shap_series = pd.Series(sv, index=feature_names)
         top = shap_series.abs().sort_values(ascending=False).head(10).index
 
-        shap_df = pd.DataFrame({
-            "feature": top,
-            "value": row.iloc[0][top].values,
-            "shap": shap_series[top].values
-        }).sort_values("shap")
+        # Values for top features
+        name_to_idx = {n: i for i, n in enumerate(feature_names)}
+        row_flat = row_td.reshape(-1)
+
+        shap_df = pd.DataFrame(
+            {
+                "feature": top,
+                "value": [row_flat[name_to_idx[f]] for f in top],
+                "shap": shap_series[top].values,
+            }
+        ).sort_values("shap")
 
         fig_shap = px.bar(
             shap_df,
             x="shap",
             y="feature",
             orientation="h",
-            title="Top 10 feature contributions (SHAP) for this patient"
+            title="Top 10 feature contributions (SHAP) for this patient",
         )
         st.plotly_chart(fig_shap, use_container_width=True)
+        st.caption("Positive SHAP pushes risk up; negative SHAP pushes risk down.")
 
     with tab2:
         fig = px.histogram(probs, nbins=30, title="Predicted Risk Distribution (Test Set)")
@@ -230,7 +278,7 @@ def main():
         st.caption("Compares selection rate / TPR / FPR across groups at the current capacity K.")
 
         # Global Top-K selection on the test set (snapshot)
-        top_idx_global = np.argsort(-probs)[:int(max_interventions)]
+        top_idx_global = np.argsort(-probs)[: int(max_interventions)]
         selected = np.zeros(len(splits.X_test), dtype=int)
         selected[top_idx_global] = 1
 
@@ -251,12 +299,14 @@ def main():
             tpr = pos["selected"].mean() if len(pos) > 0 else np.nan
             neg = df_g[df_g["y_true"] == 0]
             fpr = neg["selected"].mean() if len(neg) > 0 else np.nan
-            return pd.Series({
-                "selection_rate": sel_rate,
-                "tpr_selected_among_positives": tpr,
-                "fpr_selected_among_negatives": fpr,
-                "count": len(df_g),
-            })
+            return pd.Series(
+                {
+                    "selection_rate": sel_rate,
+                    "tpr_selected_among_positives": tpr,
+                    "fpr_selected_among_negatives": fpr,
+                    "count": len(df_g),
+                }
+            )
 
         metrics_by_group = (
             test_raw.dropna(subset=[group_col])
@@ -268,12 +318,33 @@ def main():
 
         st.dataframe(metrics_by_group)
 
-        st.plotly_chart(px.bar(metrics_by_group, x=group_col, y="selection_rate", title="Selection Rate by Group"), use_container_width=True)
-        st.plotly_chart(px.bar(metrics_by_group, x=group_col, y="tpr_selected_among_positives", title="TPR (Selected | True Readmission) by Group"), use_container_width=True)
-        st.plotly_chart(px.bar(metrics_by_group, x=group_col, y="fpr_selected_among_negatives", title="FPR (Selected | No Readmission) by Group"), use_container_width=True)
+        st.plotly_chart(
+            px.bar(metrics_by_group, x=group_col, y="selection_rate", title="Selection Rate by Group"),
+            use_container_width=True,
+        )
+        st.plotly_chart(
+            px.bar(
+                metrics_by_group,
+                x=group_col,
+                y="tpr_selected_among_positives",
+                title="TPR (Selected | True Readmission) by Group",
+            ),
+            use_container_width=True,
+        )
+        st.plotly_chart(
+            px.bar(
+                metrics_by_group,
+                x=group_col,
+                y="fpr_selected_among_negatives",
+                title="FPR (Selected | No Readmission) by Group",
+            ),
+            use_container_width=True,
+        )
 
-        st.caption("Large gaps suggest the allocation policy may impact groups differently; pair with clinical review and mitigation.")
+        st.caption(
+            "Large gaps suggest the allocation policy may impact groups differently; pair with clinical review and mitigation."
+        )
+
 
 if __name__ == "__main__":
     main()
-
