@@ -1,8 +1,14 @@
+from pathlib import Path
 import pandas as pd
-import numpy as np
-from .config import DATA_RAW, DROP_COLS, TARGET_COL, POSITIVE_LABEL
 
-def load_raw() -> pd.DataFrame:
+# Repo root
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+# Dataset lives at repo root
+DATA_RAW = PROJECT_ROOT / "diabetic_data.csv"
+
+
+def load_raw():
     return pd.read_csv(DATA_RAW)
 
 def basic_clean(df: pd.DataFrame) -> pd.DataFrame:
