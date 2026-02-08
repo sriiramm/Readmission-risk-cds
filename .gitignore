@@ -8,8 +8,12 @@ data/raw/
 __pycache__/
 *.pyc
 
-# Model artifacts
+# Ignore joblib files by default
 *.joblib
+
+# BUT allow trained models in the models directory
+!models/*.joblib
+
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
